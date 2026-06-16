@@ -7,6 +7,7 @@ const { connectRedis } = require('./config/redis')
 const { initSockets } = require('./sockets')
 const MessageModel = require('./models/message.model')
 const { getAllowedOrigins } = require('./config/cors')
+const { checkDatabaseSchema } = require('./utils/dbHealth')
 
 const PORT = process.env.PORT || 5000
 
@@ -18,6 +19,18 @@ async function start() {
     } catch (e) {
         console.error('✗ PostgreSQL connection failed:', e.message)
         process.exit(1)
+    }
+
+    try {
+        const schema = await checkDatabaseSchema()
+        if (!schema.ok) {
+            console.warn('⚠ Database missing tables:', schema.missing.join(', '))
+            console.warn('  Run: npm run migrate')
+        } else {
+            console.log(`✓ Database schema ok (${schema.tables.length} tables)`)
+        }
+    } catch (e) {
+        console.warn('⚠ Could not verify database schema:', e.message)
     }
 
     // Connect Redis (optional — fall back if not available)

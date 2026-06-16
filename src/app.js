@@ -37,8 +37,25 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')))
 // ─── Rate Limit ────────────────────────────────────────────────────────────────
 app.use('/api', apiLimiter)
 
+const { checkDatabaseSchema } = require('./utils/dbHealth')
+
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }))
+
+app.get('/health/db', async (req, res) => {
+    try {
+        const schema = await checkDatabaseSchema()
+        const status = schema.ok ? 200 : 503
+        res.status(status).json({
+            status: schema.ok ? 'ok' : 'degraded',
+            missingTables: schema.missing,
+            tables: schema.tables,
+            timestamp: new Date().toISOString(),
+        })
+    } catch (err) {
+        res.status(503).json({ status: 'error', message: err.message })
+    }
+})
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 app.use('/api/auth',          require('./routes/auth.routes'))
@@ -55,8 +72,22 @@ app.use((req, res) => error(res, `Route ${req.method} ${req.path} not found`, 40
 
 // ─── Global Error Handler ─────────────────────────────────────────────────────
 app.use((err, req, res, next) => {
-    console.error(err.stack)
-    error(res, err.message || 'Internal server error', err.statusCode || 500)
+    console.error(err.stack || err)
+
+    if (err.code === '23505') {
+        return error(res, 'This record already exists', 409)
+    }
+    if (err.code === '42P01') {
+        return error(res, 'Database not fully migrated. Contact support.', 503)
+    }
+
+    const status = err.statusCode || err.status || 500
+    const message =
+        status === 500 && process.env.NODE_ENV === 'production'
+            ? 'Something went wrong. Please try again.'
+            : (err.message || 'Internal server error')
+
+    error(res, message, status)
 })
 
 module.exports = app

@@ -8,46 +8,63 @@ const { success, error } = require('../utils/response')
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID)
 
 const sendOtp = async (req, res) => {
-    const { phone } = req.body
-    const otp = generateOtp()
-    await storeOtp(phone, otp)
-    await sendOtpSms(phone, otp)
+    try {
+        const { phone } = req.body
+        const otp = generateOtp()
+        await storeOtp(phone, otp)
+        await sendOtpSms(phone, otp)
 
-    // Dev / staging: return OTP in API response for testing
-    const showDevOtp =
-        process.env.NODE_ENV === 'development' || process.env.OTP_RETURN_DEV === 'true'
-    const devPayload = showDevOtp ? { devOtp: otp } : {}
-    success(res, devPayload, 'OTP sent successfully')
+        const showDevOtp =
+            process.env.NODE_ENV === 'development' || process.env.OTP_RETURN_DEV === 'true'
+        const devPayload = showDevOtp ? { devOtp: otp } : {}
+        success(res, devPayload, 'OTP sent successfully')
+    } catch (err) {
+        console.error('[sendOtp]', err)
+        error(res, 'Could not send OTP. Please try again.', 500)
+    }
 }
 
 const verifyOtpLogin = async (req, res) => {
-    const { phone, otp } = req.body
-    const valid = await verifyOtp(phone, otp)
-    if (!valid) return error(res, 'Invalid or expired OTP', 400)
+    try {
+        const { phone, otp } = req.body
+        const valid = await verifyOtp(phone, otp)
+        if (!valid) return error(res, 'Invalid or expired OTP', 400)
 
-    let user = await UserModel.findByPhone(phone)
-    const isNew = !user
+        let user = await UserModel.findByPhone(phone)
 
-    if (!user) {
-        return success(res, { isNew: true, phone }, 'OTP verified. Complete registration.')
+        if (!user) {
+            return success(res, { isNew: true, phone }, 'OTP verified. Complete registration.')
+        }
+
+        await UserModel.updateLastSeen(user.id)
+        const { accessToken, refreshToken } = generateTokens({ id: user.id, alias: user.alias })
+        success(res, { accessToken, refreshToken, user: sanitize(user), isNew: false })
+    } catch (err) {
+        console.error('[verifyOtpLogin]', err)
+        error(res, 'Could not verify OTP. Please try again.', 500)
     }
-
-    UserModel.updateLastSeen(user.id)
-    const { accessToken, refreshToken } = generateTokens({ id: user.id, alias: user.alias })
-    success(res, { accessToken, refreshToken, user: sanitize(user), isNew: false })
 }
 
 const register = async (req, res) => {
-    const { phone, alias, age, gender, relationshipStatus, desireTags, profession, city, country } = req.body
+    try {
+        const { phone, alias, age, gender, relationshipStatus, desireTags, profession, city, country } = req.body
 
-    const existing = await UserModel.findByPhone(phone)
-    if (existing) return error(res, 'Phone already registered', 409)
+        const existing = await UserModel.findByPhone(phone)
+        if (existing) return error(res, 'Phone already registered', 409)
 
-    const user = await UserModel.create({ phone, alias, age, gender, relationshipStatus, desireTags, profession, city, country })
-    await sendEmail(null, 'welcome', { alias })
+        const user = await UserModel.create({ phone, alias, age, gender, relationshipStatus, desireTags, profession, city, country })
+        try {
+            await sendEmail(null, 'welcome', { alias })
+        } catch (emailErr) {
+            console.warn('[register] welcome email skipped:', emailErr.message)
+        }
 
-    const { accessToken, refreshToken } = generateTokens({ id: user.id, alias: user.alias })
-    success(res, { accessToken, refreshToken, user: sanitize(user) }, 'Account created', 201)
+        const { accessToken, refreshToken } = generateTokens({ id: user.id, alias: user.alias })
+        success(res, { accessToken, refreshToken, user: sanitize(user) }, 'Account created', 201)
+    } catch (err) {
+        console.error('[register]', err)
+        error(res, 'Registration failed. Please try again.', 500)
+    }
 }
 
 // Legacy: ID token flow (for server-side verification)
