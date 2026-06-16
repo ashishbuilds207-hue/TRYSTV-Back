@@ -8,6 +8,7 @@ const { initSockets } = require('./sockets')
 const MessageModel = require('./models/message.model')
 const { getAllowedOrigins } = require('./config/cors')
 const { checkDatabaseSchema } = require('./utils/dbHealth')
+const { applyStartupPatches } = require('./db/startupPatches')
 
 const PORT = process.env.PORT || 5000
 
@@ -19,6 +20,13 @@ async function start() {
     } catch (e) {
         console.error('✗ PostgreSQL connection failed:', e.message)
         process.exit(1)
+    }
+
+    try {
+        await applyStartupPatches()
+        console.log('✓ Database startup patches applied')
+    } catch (e) {
+        console.warn('⚠ Startup patches:', e.message)
     }
 
     try {

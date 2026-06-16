@@ -17,8 +17,11 @@ const sendOtp = async (req, res) => {
         success(res, { otpMode }, 'OTP sent to your email')
     } catch (err) {
         console.error('[sendOtp]', err)
-        const status = err.message?.includes('email') || err.message?.includes('Email') ? 503 : 500
-        error(res, err.message || 'Could not send OTP. Please try again.', status)
+        const msg = err.message || 'Could not send OTP. Please try again.'
+        const isSchema = /column|relation|does not exist/i.test(msg)
+        const isEmail = /email/i.test(msg)
+        const status = isSchema ? 503 : isEmail ? 503 : 500
+        error(res, isSchema ? 'Server database needs update. Contact support or retry shortly.' : msg, status)
     }
 }
 

@@ -10,6 +10,7 @@ const MIGRATION_FILES = [
     'migration_otp_email.sql',
     'migration_v2.sql',
     'migration_v3.sql',
+    'migration_v4_engagement.sql',
 ]
 
 async function runSqlFile(filePath) {
