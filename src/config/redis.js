@@ -1,11 +1,27 @@
-const { createClient } = require('redis')
+const { createClient, createCluster } = require('redis')
 
 let redisClient = null
 
+const buildSocketOptions = (url) => {
+    if (!url.startsWith('rediss://')) return undefined
+    return { tls: true, rejectUnauthorized: false, connectTimeout: 10000 }
+}
+
 const connectRedis = async () => {
-    redisClient = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' })
+    const url = process.env.REDIS_URL || 'redis://localhost:6379'
+    const socket = buildSocketOptions(url)
+
+    if (url.includes('clustercfg.')) {
+        redisClient = createCluster({
+            rootNodes: [{ url }],
+            defaults: { socket },
+        })
+    } else {
+        redisClient = createClient({ url, socket })
+    }
+
     redisClient.on('error', (err) => console.error('Redis error:', err))
-    redisClient.on('connect', () => console.log('Redis connected'))
+    redisClient.on('connect', () => console.log('✓ Redis connected'))
     await redisClient.connect()
     return redisClient
 }
