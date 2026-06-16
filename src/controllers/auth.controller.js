@@ -13,11 +13,7 @@ const sendOtp = async (req, res) => {
         const otp = generateOtp()
         await storeOtp(phone, otp)
         await sendOtpSms(phone, otp)
-
-        const showDevOtp =
-            process.env.NODE_ENV === 'development' || process.env.OTP_RETURN_DEV === 'true'
-        const devPayload = showDevOtp ? { devOtp: otp } : {}
-        success(res, devPayload, 'OTP sent successfully')
+        success(res, {}, 'OTP sent successfully')
     } catch (err) {
         console.error('[sendOtp]', err)
         error(res, 'Could not send OTP. Please try again.', 500)
