@@ -6,16 +6,16 @@ const { authLimiter, otpLimiter } = require('../middleware/rateLimiter.middlewar
 const ctrl = require('../controllers/auth.controller')
 
 router.post('/send-otp', otpLimiter,
-    body('phone').isMobilePhone(),
+    body('phone').isMobilePhone('any'),
     validate, ctrl.sendOtp)
 
 router.post('/verify-otp', authLimiter,
-    body('phone').isMobilePhone(),
+    body('phone').isMobilePhone('any'),
     body('otp').isLength({ min: 6, max: 6 }),
     validate, ctrl.verifyOtpLogin)
 
 router.post('/register',
-    body('phone').isMobilePhone(),
+    body('phone').isMobilePhone('any'),
     body('alias').isLength({ min: 2, max: 50 }),
     body('age').isInt({ min: 18, max: 99 }),
     body('gender').isIn(['male', 'female', 'other']),

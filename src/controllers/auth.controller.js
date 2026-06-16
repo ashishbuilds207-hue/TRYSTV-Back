@@ -1,6 +1,7 @@
 const { OAuth2Client } = require('google-auth-library')
 const UserModel = require('../models/user.model')
 const { generateOtp, storeOtp, verifyOtp, sendOtpSms } = require('../services/otp.service')
+const { normalizePhone } = require('../utils/phone')
 const { sendEmail } = require('../services/email.service')
 const { generateTokens, verifyRefresh } = require('../utils/jwt')
 const { success, error } = require('../utils/response')
@@ -16,20 +17,22 @@ const sendOtp = async (req, res) => {
         success(res, {}, 'OTP sent successfully')
     } catch (err) {
         console.error('[sendOtp]', err)
-        error(res, 'Could not send OTP. Please try again.', 500)
+        const status = err.message?.includes('SMS') || err.message?.includes('Twilio') ? 502 : 500
+        error(res, err.message || 'Could not send OTP. Please try again.', status)
     }
 }
 
 const verifyOtpLogin = async (req, res) => {
     try {
         const { phone, otp } = req.body
-        const valid = await verifyOtp(phone, otp)
+        const normalizedPhone = normalizePhone(phone)
+        const valid = await verifyOtp(normalizedPhone, otp)
         if (!valid) return error(res, 'Invalid or expired OTP', 400)
 
-        let user = await UserModel.findByPhone(phone)
+        let user = await UserModel.findByPhone(normalizedPhone)
 
         if (!user) {
-            return success(res, { isNew: true, phone }, 'OTP verified. Complete registration.')
+            return success(res, { isNew: true, phone: normalizedPhone }, 'OTP verified. Complete registration.')
         }
 
         await UserModel.updateLastSeen(user.id)
@@ -44,11 +47,12 @@ const verifyOtpLogin = async (req, res) => {
 const register = async (req, res) => {
     try {
         const { phone, alias, age, gender, relationshipStatus, desireTags, profession, city, country } = req.body
+        const normalizedPhone = normalizePhone(phone)
 
-        const existing = await UserModel.findByPhone(phone)
+        const existing = await UserModel.findByPhone(normalizedPhone)
         if (existing) return error(res, 'Phone already registered', 409)
 
-        const user = await UserModel.create({ phone, alias, age, gender, relationshipStatus, desireTags, profession, city, country })
+        const user = await UserModel.create({ phone: normalizedPhone, alias, age, gender, relationshipStatus, desireTags, profession, city, country })
         try {
             await sendEmail(null, 'welcome', { alias })
         } catch (emailErr) {
