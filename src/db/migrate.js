@@ -7,6 +7,7 @@ const REQUIRED_TABLES = require('./requiredTables')
 const MIGRATION_FILES = [
     'migration_v1_base.sql',
     'migration_otp_store.sql',
+    'migration_otp_email.sql',
     'migration_v2.sql',
     'migration_v3.sql',
 ]

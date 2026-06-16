@@ -56,6 +56,17 @@ async function start() {
     // Cleanup expired messages every hour
     setInterval(() => MessageModel.deleteExpired(), 60 * 60 * 1000)
 
+    server.on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+            console.error(`✗ Port ${PORT} is already in use.`)
+            console.error('  Stop the other BACKTRY process, or run:')
+            console.error(`    netstat -ano | findstr :${PORT}`)
+            console.error('    taskkill /PID <PID> /F')
+            process.exit(1)
+        }
+        throw err
+    })
+
     server.listen(PORT, () => {
         console.log(`✓ TRYST API running on port ${PORT}`)
         console.log(`  Environment: ${process.env.NODE_ENV || 'development'}`)

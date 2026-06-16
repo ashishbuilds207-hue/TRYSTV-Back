@@ -1,7 +1,6 @@
 const { OAuth2Client } = require('google-auth-library')
 const UserModel = require('../models/user.model')
-const { generateOtp, storeOtp, verifyOtp, sendOtpSms, useTwilioVerify } = require('../services/otp.service')
-const { normalizePhone } = require('../utils/phone')
+const { generateOtp, storeOtp, verifyOtp, sendOtpEmail, normalizeEmail } = require('../services/otp.service')
 const { sendEmail } = require('../services/email.service')
 const { generateTokens, verifyRefresh } = require('../utils/jwt')
 const { success, error } = require('../utils/response')
@@ -10,31 +9,30 @@ const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID)
 
 const sendOtp = async (req, res) => {
     try {
-        const { phone } = req.body
+        const { email } = req.body
+        const normalized = normalizeEmail(email)
         const otp = generateOtp()
-        if (!useTwilioVerify()) {
-            await storeOtp(phone, otp)
-        }
-        await sendOtpSms(phone, otp)
-        success(res, {}, 'OTP sent successfully')
+        await storeOtp(normalized, otp)
+        const otpMode = await sendOtpEmail(normalized, otp)
+        success(res, { otpMode }, 'OTP sent to your email')
     } catch (err) {
         console.error('[sendOtp]', err)
-        const status = err.message?.includes('SMS') || err.message?.includes('Twilio') ? 503 : 500
+        const status = err.message?.includes('email') || err.message?.includes('Email') ? 503 : 500
         error(res, err.message || 'Could not send OTP. Please try again.', status)
     }
 }
 
 const verifyOtpLogin = async (req, res) => {
     try {
-        const { phone, otp } = req.body
-        const normalizedPhone = normalizePhone(phone)
-        const valid = await verifyOtp(normalizedPhone, otp)
+        const { email, otp } = req.body
+        const normalized = normalizeEmail(email)
+        const valid = await verifyOtp(normalized, otp)
         if (!valid) return error(res, 'Invalid or expired OTP', 400)
 
-        let user = await UserModel.findByPhone(normalizedPhone)
+        let user = await UserModel.findByEmail(normalized)
 
         if (!user) {
-            return success(res, { isNew: true, phone: normalizedPhone }, 'OTP verified. Complete registration.')
+            return success(res, { isNew: true, email: normalized }, 'OTP verified. Complete registration.')
         }
 
         await UserModel.updateLastSeen(user.id)
@@ -48,15 +46,23 @@ const verifyOtpLogin = async (req, res) => {
 
 const register = async (req, res) => {
     try {
-        const { phone, alias, age, gender, relationshipStatus, desireTags, profession, city, country } = req.body
-        const normalizedPhone = normalizePhone(phone)
+        const { email, alias, age, gender, relationshipStatus, desireTags, profession, city, country, googleId, avatarUrl } = req.body
+        const normalized = normalizeEmail(email)
 
-        const existing = await UserModel.findByPhone(normalizedPhone)
-        if (existing) return error(res, 'Phone already registered', 409)
+        if (googleId) {
+            const existingGoogle = await UserModel.findByGoogleId(googleId)
+            if (existingGoogle) return error(res, 'Google account already registered', 409)
+        }
 
-        const user = await UserModel.create({ phone: normalizedPhone, alias, age, gender, relationshipStatus, desireTags, profession, city, country })
+        const existing = await UserModel.findByEmail(normalized)
+        if (existing) return error(res, 'Email already registered', 409)
+
+        const user = await UserModel.create({
+            email: normalized, alias, age, gender, relationshipStatus, desireTags, profession, city, country,
+            googleId: googleId || null, avatarUrl: avatarUrl || null,
+        })
         try {
-            await sendEmail(null, 'welcome', { alias })
+            await sendEmail(normalized, 'welcome', { alias: user.alias })
         } catch (emailErr) {
             console.warn('[register] welcome email skipped:', emailErr.message)
         }
@@ -69,7 +75,6 @@ const register = async (req, res) => {
     }
 }
 
-// Legacy: ID token flow (for server-side verification)
 const googleLogin = async (req, res) => {
     const { idToken } = req.body
     let payload
@@ -82,12 +87,10 @@ const googleLogin = async (req, res) => {
     return handleGoogleUser(res, payload.sub, payload.email, payload.name, payload.picture)
 }
 
-// Access token flow (frontend sends access_token from @react-oauth/google)
 const googleAccessLogin = async (req, res) => {
     const { accessToken, googleId, email, name, avatar } = req.body
     if (!accessToken || !googleId || !email) return error(res, 'Missing Google credentials', 400)
 
-    // Verify the token is legit by calling Google userinfo
     try {
         const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
             headers: { Authorization: `Bearer ${accessToken}` },

@@ -14,10 +14,11 @@ const DIARY_PROMPTS = [
 const getEngagementHome = async (req, res) => {
     const userId = req.user.id
     try {
-        const [meRes, chemRes, momentsRes, weeklyRes] = await Promise.all([
+        const [meRes, chemRes, momentsRes, weeklyRes, allChemRes, visitorsRes, promptsRes, mediaRes] = await Promise.all([
             query(`
                 SELECT alias, desire_streak_count, streak_last_date, city,
-                       desire_archetype, is_gold, is_obsidian, avatar_url
+                       desire_archetype, is_gold, is_obsidian, avatar_url, credits,
+                       disguise_mode_enabled, active_disguise_skin, is_ghost_mode
                 FROM users WHERE id = $1
             `, [userId]),
             query(`
@@ -46,26 +47,90 @@ const getEngagementHome = async (req, res) => {
                   AND wp.week_start = date_trunc('week', NOW())::date
                 LIMIT 1
             `, [userId]),
+            query(`
+                SELECT m.id, COALESCE(m.chemistry_score, 0) AS chemistry_score,
+                       u.alias, u.avatar_url, u.id AS partner_id
+                FROM matches m
+                JOIN users u ON (
+                    CASE WHEN m.user1_id = $1 THEN m.user2_id ELSE m.user1_id END
+                ) = u.id
+                WHERE (m.user1_id = $1 OR m.user2_id = $1) AND m.is_active = true
+                ORDER BY m.chemistry_score DESC NULLS LAST LIMIT 5
+            `, [userId]),
+            query(`
+                SELECT COUNT(*)::int AS total
+                FROM profile_views WHERE viewed_id = $1
+                  AND created_at > NOW() - INTERVAL '7 days'
+            `, [userId]).catch(() => ({ rows: [{ total: 0 }] })),
+            query(`
+                SELECT ap.id, ap.prompt_type, ap.content, ap.created_at,
+                       (SELECT COUNT(*)::int FROM prompt_likes pl WHERE pl.prompt_id = ap.id) AS like_count,
+                       (SELECT COUNT(*)::int FROM prompt_replies pr WHERE pr.prompt_id = ap.id) AS reply_count,
+                       EXISTS(SELECT 1 FROM prompt_likes pl2 WHERE pl2.prompt_id = ap.id AND pl2.user_id = $1) AS liked
+                FROM anonymous_prompts ap
+                WHERE ap.user_id != $1 AND ap.expires_at > NOW()
+                ORDER BY ap.created_at DESC LIMIT 8
+            `, [userId]).catch(() => ({ rows: [] })),
+            query(`
+                SELECT media_type FROM daily_media_posts
+                WHERE user_id = $1 AND post_date = CURRENT_DATE
+            `, [userId]).catch(() => ({ rows: [] })),
         ])
 
         const me = meRes.rows[0]
         const hour = new Date().getHours()
         const isNight = hour >= 22 || hour < 4
+        const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : hour < 22 ? 'Good evening' : 'After dark'
         const dayPrompt = DIARY_PROMPTS[new Date().getDay() % DIARY_PROMPTS.length]
 
         const chem = chemRes.rows[0]
+        const allChemistry = allChemRes.rows.map(c => ({
+            score: Math.round(c.chemistry_score || 0),
+            alias: c.alias,
+            avatarUrl: c.avatar_url,
+            partnerId: c.partner_id,
+        }))
+        const visitorCount = visitorsRes.rows[0]?.total || 0
+        const postedToday = mediaRes.rows.map(r => r.media_type)
+        const dailyMediaTasks = [
+            { type: 'photo', label: 'Photo prompt', points: 5, done: postedToday.includes('photo') },
+            { type: 'voice', label: 'Voice note', points: 8, done: postedToday.includes('voice') },
+            { type: 'video', label: 'Video prompt', points: 10, done: postedToday.includes('video') },
+        ]
+
         success(res, {
             alias: me?.alias,
             avatarUrl: me?.avatar_url,
             city: me?.city,
+            points: me?.credits || 0,
             streak: me?.desire_streak_count || 0,
             streakLastDate: me?.streak_last_date,
+            greeting,
             chemistry: chem ? {
                 score: Math.round(chem.chemistry_score || 0),
                 alias: chem.alias,
                 avatarUrl: chem.avatar_url,
                 partnerId: chem.partner_id,
             } : null,
+            allChemistry,
+            profileVisitors: {
+                count: visitorCount,
+                unlockCost: 15,
+                unlocked: false,
+            },
+            anonymousPrompts: promptsRes.rows.map(p => ({
+                id: p.id,
+                type: p.prompt_type,
+                preview: p.content.slice(0, 120),
+                likeCount: p.like_count,
+                replyCount: p.reply_count,
+                liked: p.liked,
+                createdAt: p.created_at,
+            })),
+            dailyMediaTasks,
+            disguiseModeEnabled: me?.disguise_mode_enabled,
+            activeDisguiseSkin: me?.active_disguise_skin || 'newspaper',
+            isGhostMode: me?.is_ghost_mode,
             moments: momentsRes.rows.map(m => ({
                 id: m.id, content: m.content, city: m.city,
                 createdAt: m.created_at, alias: m.alias, avatarUrl: m.avatar_url,
@@ -115,7 +180,18 @@ const checkInStreak = async (req, res) => {
             'UPDATE users SET desire_streak_count = $1, streak_last_date = $2 WHERE id = $3',
             [newStreak, today, userId]
         )
-        success(res, { streak: newStreak, alreadyCheckedIn: false, isConsecutive })
+
+        let pointsEarned = 2
+        if (newStreak === 7) pointsEarned = 10
+        else if (newStreak === 14) pointsEarned = 20
+        else if (newStreak === 30) pointsEarned = 50
+        if (pointsEarned > 2) {
+            await query('UPDATE users SET credits = credits + $1 WHERE id = $2', [pointsEarned, userId])
+        } else {
+            await query('UPDATE users SET credits = credits + 2 WHERE id = $1', [userId])
+        }
+
+        success(res, { streak: newStreak, alreadyCheckedIn: false, isConsecutive, pointsEarned })
     } catch {
         error(res, 'Streak check-in failed', 500)
     }
@@ -207,7 +283,83 @@ const getWeeklyPick = async (req, res) => {
     }
 }
 
+const postDailyMedia = async (req, res) => {
+    const userId = req.user.id
+    const { mediaType, content } = req.body
+    const valid = ['photo', 'voice', 'video']
+    if (!valid.includes(mediaType)) return error(res, 'Invalid media type', 400)
+    const pointsMap = { photo: 5, voice: 8, video: 10 }
+    try {
+        const { rows } = await query(`
+            INSERT INTO daily_media_posts (user_id, media_type, content, points_awarded)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (user_id, media_type, post_date) DO UPDATE SET content = $3
+            RETURNING *
+        `, [userId, mediaType, content?.trim() || '', pointsMap[mediaType]])
+        await query('UPDATE users SET credits = credits + $1 WHERE id = $2', [pointsMap[mediaType], userId])
+        success(res, { pointsEarned: pointsMap[mediaType], post: rows[0] })
+    } catch {
+        error(res, 'Could not save daily post', 500)
+    }
+}
+
+const unlockVisitors = async (req, res) => {
+    const userId = req.user.id
+    const cost = 15
+    try {
+        const { rows: me } = await query('SELECT credits FROM users WHERE id = $1', [userId])
+        if ((me[0]?.credits || 0) < cost) return error(res, 'Not enough points', 402)
+        const { rows } = await query(`
+            SELECT pv.created_at, u.alias, u.avatar_url, u.age, u.city, u.id
+            FROM profile_views pv
+            JOIN users u ON pv.viewer_id = u.id
+            WHERE pv.viewed_id = $1 AND pv.created_at > NOW() - INTERVAL '7 days'
+            ORDER BY pv.created_at DESC LIMIT 20
+        `, [userId]).catch(() => ({ rows: [] }))
+        await query('UPDATE users SET credits = credits - $1 WHERE id = $2', [cost, userId])
+        success(res, {
+            visitors: rows.map(v => ({
+                alias: v.alias, avatarUrl: v.avatar_url, age: v.age, city: v.city, visitedAt: v.created_at,
+            })),
+            pointsSpent: cost,
+        })
+    } catch {
+        error(res, 'Could not unlock visitors', 500)
+    }
+}
+
+const likePrompt = async (req, res) => {
+    const userId = req.user.id
+    const { id } = req.params
+    try {
+        await query(
+            'INSERT INTO prompt_likes (prompt_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+            [id, userId]
+        ).catch(() => null)
+        success(res, { liked: true })
+    } catch {
+        error(res, 'Could not like', 500)
+    }
+}
+
+const commentPrompt = async (req, res) => {
+    const userId = req.user.id
+    const { id } = req.params
+    const { content } = req.body
+    if (!content?.trim()) return error(res, 'content required', 400)
+    try {
+        await query(
+            'INSERT INTO prompt_replies (prompt_id, user_id, content) VALUES ($1, $2, $3)',
+            [id, userId, content.trim()]
+        ).catch(() => null)
+        success(res, {}, 'Reply sent anonymously')
+    } catch {
+        error(res, 'Could not reply', 500)
+    }
+}
+
 module.exports = {
     getEngagementHome, checkInStreak, saveDiaryAnswer,
     getMoments, createMoment, getWeeklyPick,
+    postDailyMedia, unlockVisitors, likePrompt, commentPrompt,
 }
