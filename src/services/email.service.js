@@ -1,7 +1,10 @@
 const sgMail = require('@sendgrid/mail')
 sgMail.setApiKey(process.env.SENDGRID_API_KEY)
 
+const { getAppUrl } = require('../config/cors')
+
 const FROM = { email: process.env.SENDGRID_FROM_EMAIL || 'hello@tryst.app', name: process.env.SENDGRID_FROM_NAME || 'TRYST' }
+const appUrl = () => getAppUrl()
 
 const templates = {
     welcome: (alias) => ({
@@ -16,7 +19,7 @@ const templates = {
                 <p style="color:#F8F4ED;margin:0;font-size:14px;">Your alias: <strong style="color:#D4AF37;">${alias}</strong></p>
                 <p style="color:#6B4F4F;margin:8px 0 0;font-size:12px;">Your real name is never shown on TRYST.</p>
             </div>
-            <a href="${process.env.CLIENT_URL}/discover" style="display:inline-block;background:linear-gradient(135deg,#C0392B,#922B21);color:white;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600;margin-top:8px;">Begin Discovering</a>
+            <a href="${appUrl()}/discover" style="display:inline-block;background:linear-gradient(135deg,#C0392B,#922B21);color:white;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600;margin-top:8px;">Begin Discovering</a>
             <p style="color:#3D2828;font-size:12px;margin-top:32px;">© 2025 TRYST · All interactions are encrypted and private.</p>
         </div>`,
     }),
@@ -28,7 +31,7 @@ const templates = {
             <h1 style="font-family:Georgia,serif;color:#C0392B;font-size:36px;margin:0 0 32px;">TRYST</h1>
             <h2 style="color:#F8F4ED;font-size:22px;">It's a Spark, ${alias}! ✦</h2>
             <p style="color:#8A6060;line-height:1.7;">You and <strong style="color:#D4AF37;">${matchAlias}</strong> have both expressed interest. The connection is yours to explore.</p>
-            <a href="${process.env.CLIENT_URL}/chat" style="display:inline-block;background:linear-gradient(135deg,#C0392B,#922B21);color:white;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600;margin-top:24px;">Send a Message</a>
+            <a href="${appUrl()}/chat" style="display:inline-block;background:linear-gradient(135deg,#C0392B,#922B21);color:white;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600;margin-top:24px;">Send a Message</a>
             <p style="color:#3D2828;font-size:12px;margin-top:32px;">© 2025 TRYST · This email was sent to protect your privacy notifications.</p>
         </div>`,
     }),

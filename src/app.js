@@ -11,12 +11,14 @@ const { error } = require('./utils/response')
 
 const path = require('path')
 
+const { corsOrigin } = require('./config/cors')
+
 const app = express()
 
 // ─── Security & Middleware ─────────────────────────────────────────────────────
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }))
 app.use(cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:3000',
+    origin: corsOrigin,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],

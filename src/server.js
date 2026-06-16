@@ -6,6 +6,7 @@ const { pool } = require('./config/database')
 const { connectRedis } = require('./config/redis')
 const { initSockets } = require('./sockets')
 const MessageModel = require('./models/message.model')
+const { getAllowedOrigins } = require('./config/cors')
 
 const PORT = process.env.PORT || 5000
 
@@ -30,7 +31,7 @@ async function start() {
     const server = http.createServer(app)
     const io = new Server(server, {
         cors: {
-            origin: process.env.CLIENT_URL || 'http://localhost:3000',
+            origin: getAllowedOrigins(),
             methods: ['GET', 'POST'],
             credentials: true,
         },
