@@ -1,6 +1,6 @@
 const { OAuth2Client } = require('google-auth-library')
 const UserModel = require('../models/user.model')
-const { generateOtp, storeOtp, verifyOtp, sendOtpSms } = require('../services/otp.service')
+const { generateOtp, storeOtp, verifyOtp, sendOtpSms, useTwilioVerify } = require('../services/otp.service')
 const { normalizePhone } = require('../utils/phone')
 const { sendEmail } = require('../services/email.service')
 const { generateTokens, verifyRefresh } = require('../utils/jwt')
@@ -12,7 +12,9 @@ const sendOtp = async (req, res) => {
     try {
         const { phone } = req.body
         const otp = generateOtp()
-        await storeOtp(phone, otp)
+        if (!useTwilioVerify()) {
+            await storeOtp(phone, otp)
+        }
         await sendOtpSms(phone, otp)
         success(res, {}, 'OTP sent successfully')
     } catch (err) {
