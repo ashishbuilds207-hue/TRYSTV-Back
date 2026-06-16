@@ -17,7 +17,7 @@ const sendOtp = async (req, res) => {
         success(res, {}, 'OTP sent successfully')
     } catch (err) {
         console.error('[sendOtp]', err)
-        const status = err.message?.includes('SMS') || err.message?.includes('Twilio') ? 502 : 500
+        const status = err.message?.includes('SMS') || err.message?.includes('Twilio') ? 503 : 500
         error(res, err.message || 'Could not send OTP. Please try again.', status)
     }
 }
