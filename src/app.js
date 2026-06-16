@@ -15,6 +15,9 @@ const { corsOrigin } = require('./config/cors')
 
 const app = express()
 
+// Behind Nginx on EC2 — required for rate-limit + correct client IP
+app.set('trust proxy', 1)
+
 // ─── Security & Middleware ─────────────────────────────────────────────────────
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }))
 app.use(cors({

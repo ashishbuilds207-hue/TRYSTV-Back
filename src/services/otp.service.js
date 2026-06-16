@@ -33,18 +33,29 @@ const verifyOtp = async (phone, otp) => {
     return true
 }
 
-// Twilio send (real)
+// Twilio send (real) — falls back to console log when Twilio is not configured
 const sendOtpSms = async (phone, otp) => {
-    if (process.env.NODE_ENV === 'development') {
+    const hasTwilio =
+        process.env.TWILIO_ACCOUNT_SID &&
+        process.env.TWILIO_AUTH_TOKEN &&
+        process.env.TWILIO_PHONE_NUMBER
+
+    if (process.env.NODE_ENV === 'development' || process.env.OTP_LOG_ONLY === 'true' || !hasTwilio) {
         console.log(`[OTP] ${phone} → ${otp}`)
         return
     }
-    const twilio = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
-    await twilio.messages.create({
-        body: `Your TRYST verification code is ${otp}. Valid for ${process.env.OTP_EXPIRY_MINUTES || 10} minutes. Never share this.`,
-        from: process.env.TWILIO_PHONE_NUMBER,
-        to: phone,
-    })
+
+    try {
+        const twilio = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
+        await twilio.messages.create({
+            body: `Your TRYST verification code is ${otp}. Valid for ${process.env.OTP_EXPIRY_MINUTES || 10} minutes. Never share this.`,
+            from: process.env.TWILIO_PHONE_NUMBER,
+            to: phone,
+        })
+    } catch (err) {
+        console.error('[OTP] Twilio send failed:', err.message)
+        console.log(`[OTP] ${phone} → ${otp}`)
+    }
 }
 
 module.exports = { generateOtp, storeOtp, verifyOtp, sendOtpSms }

@@ -13,8 +13,10 @@ const sendOtp = async (req, res) => {
     await storeOtp(phone, otp)
     await sendOtpSms(phone, otp)
 
-    // In dev mode return OTP in response so it shows on screen
-    const devPayload = process.env.NODE_ENV === 'development' ? { devOtp: otp } : {}
+    // Dev / staging: return OTP in API response for testing
+    const showDevOtp =
+        process.env.NODE_ENV === 'development' || process.env.OTP_RETURN_DEV === 'true'
+    const devPayload = showDevOtp ? { devOtp: otp } : {}
     success(res, devPayload, 'OTP sent successfully')
 }
 
